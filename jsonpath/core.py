@@ -1,7 +1,9 @@
 # coding: utf-8
 
+import json
 from collections import namedtuple
 
+# Node types
 ROOT_NODE = 'ROOT'
 WILDCARD_NODE = 'WILDCARD'
 DESCENDANT_NODE = 'DESCENDANT'
@@ -13,8 +15,23 @@ IDENTIFIER_NODE = 'IDENTIFIER'
 Node = namedtuple('Node', 'type, value')
 
 
-class ValueNotFound(object):
-    pass
+class MatchNotFound(object):
+    value = None
+
+    def __repr__(self):
+        return u'MatchNotFound'
+
+
+class Match(object):
+    def __init__(self, value):
+        try:
+            # value can be an instance of Match
+            self.value = value.value
+        except AttributeError:
+            self.value = value
+
+    def __repr__(self):
+        return u'Match(value={value})'.format(value=json.dumps(self.value))
 
 
 class JsonPath(object):
@@ -22,50 +39,58 @@ class JsonPath(object):
         self.nodes = nodes
 
     def find(self, data):
-        parent = None
+        data = Match(data)
         root = data
         values = []
 
         nodes = self.nodes
         while nodes:
             node = nodes[0]
-            try:
-                nodes = nodes[1:]
-            except IndexError:
-                nodes = []
-
-            node_value = self._get_node_value(node, data, parent, root)
-
-            parent = data
+            nodes = nodes[1:]
+            node_value = self._get_node_value(node, data, root)
             data = node_value
-
             if not nodes:
                 values = node_value
 
         if not isinstance(values, list):
             values = [values]
 
-        return values
+        return [value for value in values if not isinstance(value, MatchNotFound)]
 
-    def _get_node_value(self, node, data, parent, root, scope=None):
+    def _get_node_value(self, node, data, root):
         if node.type == ROOT_NODE:
             value = root
-        if node.type == IDENTIFIER_NODE and isinstance(data, list):
-            value = [self._get_node_value(node, datum, parent, root) for datum in data]
-        elif node.type in (IDENTIFIER_NODE, INDEX_NODE, SLICE_NODE):
+        # data can be a Match object or a list of Match objects
+        elif isinstance(data, list):
+            value = [self._get_node_value(node, datum, root) for datum in data]
+        elif node.type in (IDENTIFIER_NODE, INDEX_NODE):
             try:
-                value = data[node.value]
-            except KeyError:
-                value = ValueNotFound
+                value = Match(data.value[node.value])
+            except (KeyError, TypeError):
+                value = MatchNotFound()
+        elif node.type == SLICE_NODE:
+            try:
+                value = [Match(val) for val in data.value[node.value]]
+            except (KeyError, TypeError):
+                value = MatchNotFound()
         elif node.type == WILDCARD_NODE:
+            data = data.value
             if isinstance(data, list):
-                value = data
+                value = [Match(val) for val in data]
             elif isinstance(data, dict):
-                value = data.values()
+                value = [Match(val) for val in data.values()]
             else:
-                value = ValueNotFound
+                value = MatchNotFound()
         elif node.type == DESCENDANT_NODE:
             raise NotImplementedError('Descendant is not implemented')
+        else:  # pragma: no cover
+            raise ValueError('Unknown node type: {}'.format(node.type))
+
+        if isinstance(value, list) and len(value) >= 1 and isinstance(value[0], list):
+            # if the original query have more than one wildcard, we can get a list of lists
+            # but we want a flat list
+            value = [item for sublist in value for item in sublist]
+
         return value
 
 
@@ -77,7 +102,7 @@ def tokenize(query):
     """
 
     root = '$'
-    separator = '.'
+    identifier_separator = '.'
     escape = '\\'
     slice_l = '['
     slice_r = ']'
@@ -96,8 +121,8 @@ def tokenize(query):
         elif char in root:
             yield char
             token = ''
-        elif char in separator:
-            if previous_char and previous_char in separator:
+        elif char in identifier_separator:
+            if previous_char and previous_char in identifier_separator:
                 yield char + char
             elif token:
                 yield token
@@ -127,7 +152,7 @@ def parse(query):
     """
 
     root = '$'
-    wildcard = '[*]'
+    wildcard = '*'
     descendant = '..'
     quotes = '"\''
     slice_l = '['
@@ -141,31 +166,39 @@ def parse(query):
         if token == root:
             node_type = ROOT_NODE
             value = None
-        elif token == wildcard:
-            node_type = WILDCARD_NODE
-            value = None
         elif token == descendant:
             node_type = DESCENDANT_NODE
             value = None
         elif token[0] == slice_l and token[-1] == slice_r:
+            # token have slice delimiter, let's check if it is really a slice
             if slice_separator in token:
+                # it is slice if we found the slice separator
                 node_type = SLICE_NODE
                 value = slice(*[int(i) for i in token[1:-1].split(':') if i])
+            elif wildcard in token:
+                # but it can also be a wildcard
+                node_type = WILDCARD_NODE
+                value = None
             else:
-                node_type = INDEX_NODE
                 try:
+                    # or an index. let's check if the value is numeric
+                    node_type = INDEX_NODE
                     value = int(token[1:-1])
                 except ValueError:
+                    # it's not numeric, so it's an identifier
                     node_type = IDENTIFIER_NODE
                     value = token[1:-1].strip()
         else:
+            # everything els is an identifier
             node_type = IDENTIFIER_NODE
             value = token.strip()
-            if value == '*':
+            if value == wildcard:
+                # except if it is a wildcard
                 node_type = WILDCARD_NODE
                 value = None
 
         if node_type == IDENTIFIER_NODE:
+            # we don't want the identifier value to be surrounded by quotes
             value = value.strip(quotes)
 
         nodes.append(Node(type=node_type, value=value))

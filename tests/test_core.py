@@ -2,8 +2,8 @@
 
 import pytest
 
-from jsonpath.core import tokenize, parse
-from jsonpath.core import ROOT_NODE, WILDCARD_NODE, DESCENDANT_NODE, SLICE_NODE, INDEX_NODE, IDENTIFIER_NODE
+from jsonpath import tokenize, parse
+from jsonpath import ROOT_NODE, WILDCARD_NODE, DESCENDANT_NODE, SLICE_NODE, INDEX_NODE, IDENTIFIER_NODE
 
 
 @pytest.fixture
@@ -35,6 +35,12 @@ def store_json():
                     "author": "J. R. R. Tolkien",
                     "title": "The Lord of the Rings",
                     "isbn": "0-395-19395-8",
+                    "price": 22.99
+                },
+                {
+                    "category": "fiction",
+                    "title": "The Hobit",
+                    "isbn": "0-395-19395-9",
                     "price": 22.99
                 }
             ],
@@ -270,33 +276,80 @@ class TestFinder:
     def test_find_bicycle_color(self, store_json):
         query = 'store.bicycle.color'
         expected_values = ['red']
-        assert parse(query).find(store_json) == expected_values
+        assert [match.value for match in parse(query).find(store_json)] == expected_values
 
     def test_find_bicycle_color_using_root(self, store_json):
         query = '$.store.bicycle.color'
         expected_values = ['red']
-        assert parse(query).find(store_json) == expected_values
+        assert [match.value for match in parse(query).find(store_json)] == expected_values
 
     def test_find_first_book_author(self, store_json):
         query = 'store.book[1].author'
         expected_values = ['Evelyn Waugh']
-        assert parse(query).find(store_json) == expected_values
+        assert [match.value for match in parse(query).find(store_json)] == expected_values
 
-    def test_find_books_author_except_first_and_last(self, store_json):
-        query = '$.store.book[1:-1].author'
+    def test_find_books_author_except_first_and_last_two(self, store_json):
+        query = '$.store.book[1:-2].author'
         expected_values = ['Evelyn Waugh', 'Herman Melville']
-        assert parse(query).find(store_json) == expected_values
+        assert [match.value for match in parse(query).find(store_json)] == expected_values
+
+    def test_find_slice_a_map(self, store_json):
+        query = '$.store[1:-2]'
+        expected_values = []
+        assert [match.value for match in parse(query).find(store_json)] == expected_values
 
     def test_find_authors(self, store_json):
         query = 'store.book[*].author'
         expected_values = ['Nigel Rees', 'Evelyn Waugh', 'Herman Melville', 'J. R. R. Tolkien']
-        assert parse(query).find(store_json) == expected_values
+        assert [match.value for match in parse(query).find(store_json)] == expected_values
+
+    def test_find_wildcard_a_value(self, store_json):
+        query = 'store.book[0].author[*]'
+        expected_values = []
+        assert [match.value for match in parse(query).find(store_json)] == expected_values
+
+    def test_find_multiple_wildcard(self):
+        data = {
+            "level1": [
+                {"level2": [
+                    {"level3": "A"},
+                    {"level3": "B"}
+                ]},
+                {"level2": [
+                    {"level3": "C"}
+                ]}
+            ]
+        }
+        query = 'level1[*].level2[*].level3'
+        expected_values = ['A', 'B', 'C']
+        assert [match.value for match in parse(query).find(data)] == expected_values
+
+        data = {
+            "level1": [
+                {"level2": [
+                    {"level3": [
+                        {"level4": "A"},
+                    ]},
+                    {"level3": [
+                        {"level4": "B"},
+                    ]}
+                ]},
+                {"level2": [
+                    {"level3": [
+                        {"level4": "C"},
+                        {"level4": "D"},
+                    ]}
+                ]}
+            ]
+        }
+        query = 'level1[*].level2[*].level3[*].level4'
+        expected_values = ['A', 'B', 'C', 'D']
+        assert [match.value for match in parse(query).find(data)] == expected_values
 
     def test_find_all_things_in_store(self, store_json):
         query = 'store.*'
         expected_values = [store_json['store']['book'], store_json['store']['bicycle']]
-        assert parse(query).find(store_json) == expected_values
-        assert parse(query).find(store_json) == expected_values
+        assert [match.value for match in parse(query).find(store_json)] == expected_values
 
     def test_find_all_prices(self, store_json):
         query = '$.store..price'
