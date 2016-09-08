@@ -66,7 +66,7 @@ class JsonPath(object):
         elif node.type in (IDENTIFIER_NODE, INDEX_NODE):
             try:
                 value = Match(data.value[node.value])
-            except (KeyError, TypeError):
+            except (IndexError, KeyError, TypeError):
                 value = MatchNotFound()
         elif node.type == SLICE_NODE:
             try:
