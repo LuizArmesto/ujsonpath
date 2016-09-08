@@ -1,5 +1,8 @@
 *.pyc
 *.egg-info
-.cache
-.coverage
 .idea
+.cache
+.DS_Store
+.coverage
+coverage_report
+coverage.xml
