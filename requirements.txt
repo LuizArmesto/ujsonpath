@@ -5,3 +5,4 @@ pytest-cov
 pytest-watch
 tox
 virtualenv
+codeclimate-test-reporter
