@@ -8,3 +8,5 @@
 .coverage
 coverage_report
 coverage.xml
+build
+dist
