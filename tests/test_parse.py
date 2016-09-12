@@ -141,3 +141,8 @@ class TestParse:
         query = 'level1.level2[1:3]'
         expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2']), (SLICE_NODE, slice(1, 3))]
         assert parse(query).nodes == expected_nodes
+
+    def test_parse_invalid_slice(self):
+        query = 'level1.level2[a:3].level3'
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2']), (IDENTIFIER_NODE, ['a:3']), (IDENTIFIER_NODE, ['level3'])]
+        assert parse(query).nodes == expected_nodes

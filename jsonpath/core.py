@@ -6,23 +6,30 @@ from collections import namedtuple
 
 # Symbols
 ROOT_SYMBOL = '$'
+SELF_SYMBOL = '@'  # TODO
 ESCAPE_SYMBOL = '\\'
 WILDCARD_SYMBOL = '*'
-DESCENDANT_SYMBOL = '..'
+DESCENDANT_SYMBOL = '..'  # TODO
 QUOTES_SYMBOL = '"\''
 SPACE_SYMBOL = ' '
 BRACKET_START_SYMBOL = '['
 BRACKET_END_SYMBOL = ']'
+EXPRESSION_START_SYMBOL = '('  # TODO
+EXPRESSION_END_SYMBOL = ')'  # TODO
 SLICE_OPERATOR_SYMBOL = ':'
 UNION_OPERATOR_SYMBOL = ','
+FILTER_OPERATOR_SYMBOL = '?'  # TODO
 IDENTIFIER_SYMBOL = '.'
 
 
 # Node types
 ROOT_NODE = 'ROOT'
+SELF_NODE = 'SELF'  # TODO
 WILDCARD_NODE = 'WILDCARD'
-DESCENDANT_NODE = 'DESCENDANT'
+DESCENDANT_NODE = 'DESCENDANT'  # TODO
 SLICE_NODE = 'SLICE'
+EXPRESSION_NODE = 'EXPRESSION'  # TODO
+FILTER_NODE = 'FILTER'  # TODO
 INDEX_NODE = 'INDEX'
 IDENTIFIER_NODE = INDEX_NODE
 
@@ -39,6 +46,7 @@ class MatchNotFound(object):
 
 class Match(object):
     def __init__(self, value, path):
+        self.path = path
         try:
             # value can be an instance of Match
             self.value = value.value
@@ -83,11 +91,11 @@ class JsonPath(object):
             # both, identifier and index, can be accessed as a key
             try:
                 # try to access directly
-                value = [Match(data.value[value], path) for value in node.value]
+                value = [Match(data.value[val], path) for val in node.value]
             except (IndexError, KeyError, TypeError):
                 try:
                     # try to convert to integer index
-                    value = [Match(data.value[int(value)], path) for value in node.value]
+                    value = [Match(data.value[int(val)], path) for val in node.value]
                 except (ValueError, IndexError, KeyError, TypeError):
                     # both tries failed
                     value = [MatchNotFound()]
@@ -128,14 +136,30 @@ def tokenize(query):
     previous_char = ''
     token = ''
     escaped = False
+    quoted = False
+    quote_used = ''
 
     query = query.strip()
     for char in query:
         if escaped:
-            token += char
+            if char in UNION_OPERATOR_SYMBOL + SLICE_OPERATOR_SYMBOL:
+                # don't remove escape from union symbol because unions will be evaluated later
+                token += ESCAPE_SYMBOL
             escaped = False
+            token += char
+        elif quoted:
+            if char in UNION_OPERATOR_SYMBOL + SLICE_OPERATOR_SYMBOL + ESCAPE_SYMBOL:
+                # escape special symbols used inside quotation
+                token += ESCAPE_SYMBOL
+            if char == quote_used:
+                quoted = False
+            else:
+                token += char
         elif char in ESCAPE_SYMBOL:
             escaped = True
+        elif char in QUOTES_SYMBOL:
+            quote_used = char
+            quoted = not quoted
         elif char in ROOT_SYMBOL:
             yield char
             token = ''
@@ -180,11 +204,15 @@ def parse(query):
             node_type = DESCENDANT_NODE
             value = None
         elif token[0] == BRACKET_START_SYMBOL and token[-1] == BRACKET_END_SYMBOL:
-            # token have slice delimiter, let's check if it is really a slice
-            if SLICE_OPERATOR_SYMBOL in token:
+            # token have not escaped slice delimiter, let's check if it is really a slice
+            if SLICE_OPERATOR_SYMBOL in token.replace('\\' + SLICE_OPERATOR_SYMBOL, ''):
                 # it is slice if we found the slice separator
                 node_type = SLICE_NODE
-                value = slice(*[int(i) for i in token[1:-1].split(SLICE_OPERATOR_SYMBOL) if i])
+                try:
+                    value = slice(*[int(i) for i in token[1:-1].split(SLICE_OPERATOR_SYMBOL) if i])
+                except ValueError:
+                    node_type = IDENTIFIER_NODE
+                    value = token[1:-1]
             elif WILDCARD_SYMBOL in token:
                 # but it can also be a wildcard
                 node_type = WILDCARD_NODE
@@ -210,9 +238,13 @@ def parse(query):
         if node_type == IDENTIFIER_NODE:
             try:
                 # try to split unions
-                value = value.split(UNION_OPERATOR_SYMBOL)
-                # we don't want the identifier value to be surrounded by quotes
-                value = [val.strip(QUOTES_SYMBOL + SPACE_SYMBOL) for val in value]
+                value = escaped_split(value, UNION_OPERATOR_SYMBOL)
+                value = [val.strip(SPACE_SYMBOL) for val in value]
+                # unescape union and slide operators
+                value = [val.replace(
+                    ESCAPE_SYMBOL + ESCAPE_SYMBOL, ESCAPE_SYMBOL).replace(
+                    ESCAPE_SYMBOL + UNION_OPERATOR_SYMBOL, UNION_OPERATOR_SYMBOL).replace(
+                    ESCAPE_SYMBOL + SLICE_OPERATOR_SYMBOL, SLICE_OPERATOR_SYMBOL) for val in value]
             except AttributeError:
                 # failed to strip/split because value could be a list or an integer
                 pass
@@ -221,3 +253,15 @@ def parse(query):
 
     return JsonPath(nodes)
 
+
+def escaped_split(string, char):
+    sections = string.split(char)
+    if ESCAPE_SYMBOL not in string:
+        return sections
+    sections = [section + (char if section and section[-1] == ESCAPE_SYMBOL else '') for section in sections]
+    result = ['' for _ in sections]
+    idx = 0
+    for section in sections:
+        result[idx] += section
+        idx += (1 if section and section[-1] != char else 0)
+    return [val.strip() for val in result if val != '']

@@ -157,3 +157,20 @@ class TestFind:
         query = 'level1[*].level2[*].level3[*].level4'
         expected_values = ['A', 'B', 'C', 'D']
         assert [match.value for match in parse(query).find(data)] == expected_values
+
+    def test_find_special_identifiers(self):
+        data = {
+            "$.level1": [
+                {
+                    "level2[:-1]": {
+                        "level3\\a[0,1]": "A"
+                    },
+                    "level2[:-2]": {
+                        "level3\\b[0,1]": "B"
+                    }
+                }
+            ]
+        }
+        query = '["$.level1"][*]["level2[:-1]"]["level3\\a[0,1]"]'
+        expected_values = ['A']
+        assert [match.value for match in parse(query).find(data)] == expected_values
