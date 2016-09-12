@@ -1,0 +1,9 @@
+include CHANGES.md
+include INSTALL
+include LICENSE
+include MANIFEST.in
+include README.md
+include jsonpath/VERSION
+recursive-include docs *
+prune docs/build
+recursive-include tests *

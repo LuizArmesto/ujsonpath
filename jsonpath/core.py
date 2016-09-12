@@ -3,13 +3,28 @@
 import json
 from collections import namedtuple
 
+
+# Symbols
+ROOT_SYMBOL = '$'
+ESCAPE_SYMBOL = '\\'
+WILDCARD_SYMBOL = '*'
+DESCENDANT_SYMBOL = '..'
+QUOTES_SYMBOL = '"\''
+SPACE_SYMBOL = ' '
+BRACKET_START_SYMBOL = '['
+BRACKET_END_SYMBOL = ']'
+SLICE_OPERATOR_SYMBOL = ':'
+UNION_OPERATOR_SYMBOL = ','
+IDENTIFIER_SYMBOL = '.'
+
+
 # Node types
 ROOT_NODE = 'ROOT'
 WILDCARD_NODE = 'WILDCARD'
 DESCENDANT_NODE = 'DESCENDANT'
 SLICE_NODE = 'SLICE'
 INDEX_NODE = 'INDEX'
-IDENTIFIER_NODE = 'IDENTIFIER'
+IDENTIFIER_NODE = INDEX_NODE
 
 
 Node = namedtuple('Node', 'type, value')
@@ -23,7 +38,7 @@ class MatchNotFound(object):
 
 
 class Match(object):
-    def __init__(self, value):
+    def __init__(self, value, path):
         try:
             # value can be an instance of Match
             self.value = value.value
@@ -31,15 +46,18 @@ class Match(object):
             self.value = value
 
     def __repr__(self):
-        return u'Match(value={value})'.format(value=json.dumps(self.value))
+        return u'Match(value={value}, path={path})'.format(value=json.dumps(self.value), path=self.path)
 
 
 class JsonPath(object):
     def __init__(self, nodes):
         self.nodes = nodes
 
+    def __repr__(self):
+        return u'JsonPath(nodes={nodes})'.format(nodes=json.dumps(self.nodes))
+
     def find(self, data):
-        data = Match(data)
+        data = Match(data, ROOT_SYMBOL)
         root = data
         values = []
 
@@ -52,35 +70,41 @@ class JsonPath(object):
             if not nodes:
                 values = node_value
 
-        if not isinstance(values, list):
-            values = [values]
-
         return [value for value in values if not isinstance(value, MatchNotFound)]
 
     def _get_node_value(self, node, data, root):
+        path = None
         if node.type == ROOT_NODE:
             value = root
-        # data can be a Match object or a list of Match objects
         elif isinstance(data, list):
+            # data can be a Match object or a list of Match objects
             value = [self._get_node_value(node, datum, root) for datum in data]
         elif node.type in (IDENTIFIER_NODE, INDEX_NODE):
+            # both, identifier and index, can be accessed as a key
             try:
-                value = Match(data.value[node.value])
+                # try to access directly
+                value = [Match(data.value[value], path) for value in node.value]
             except (IndexError, KeyError, TypeError):
-                value = MatchNotFound()
+                try:
+                    # try to convert to integer index
+                    value = [Match(data.value[int(value)], path) for value in node.value]
+                except (ValueError, IndexError, KeyError, TypeError):
+                    # both tries failed
+                    value = [MatchNotFound()]
         elif node.type == SLICE_NODE:
             try:
-                value = [Match(val) for val in data.value[node.value]]
+                value = [Match(val, path) for val in data.value[node.value]]
             except (KeyError, TypeError):
-                value = MatchNotFound()
+                value = [MatchNotFound()]
         elif node.type == WILDCARD_NODE:
+            # wildcard should work for lists and dicts
             data = data.value
             if isinstance(data, list):
-                value = [Match(val) for val in data]
+                value = [Match(val, path) for val in data]
             elif isinstance(data, dict):
-                value = [Match(val) for val in data.values()]
+                value = [Match(val, path) for val in data.values()]
             else:
-                value = MatchNotFound()
+                value = [MatchNotFound()]
         elif node.type == DESCENDANT_NODE:
             raise NotImplementedError('Descendant is not implemented')
         else:  # pragma: no cover
@@ -101,12 +125,6 @@ def tokenize(query):
     :return: list
     """
 
-    root = '$'
-    identifier_separator = '.'
-    escape = '\\'
-    slice_l = '['
-    slice_r = ']'
-
     previous_char = ''
     token = ''
     escaped = False
@@ -116,22 +134,22 @@ def tokenize(query):
         if escaped:
             token += char
             escaped = False
-        elif char in escape:
+        elif char in ESCAPE_SYMBOL:
             escaped = True
-        elif char in root:
+        elif char in ROOT_SYMBOL:
             yield char
             token = ''
-        elif char in identifier_separator:
-            if previous_char and previous_char in identifier_separator:
+        elif char in IDENTIFIER_SYMBOL:
+            if previous_char and previous_char in IDENTIFIER_SYMBOL:
                 yield char + char
             elif token:
                 yield token
             token = ''
-        elif char in slice_l:
+        elif char in BRACKET_START_SYMBOL:
             if token:
                 yield token
             token = char
-        elif char in slice_r:
+        elif char in BRACKET_END_SYMBOL:
             token += char
             yield token
             token = ''
@@ -151,31 +169,23 @@ def parse(query):
     :return: JsonPath object
     """
 
-    root = '$'
-    wildcard = '*'
-    descendant = '..'
-    quotes = '"\''
-    slice_l = '['
-    slice_r = ']'
-    slice_separator = ':'
-
     tokens = tokenize(query)
     nodes = []
 
     for token in tokens:
-        if token == root:
+        if token == ROOT_SYMBOL:
             node_type = ROOT_NODE
             value = None
-        elif token == descendant:
+        elif token == DESCENDANT_SYMBOL:
             node_type = DESCENDANT_NODE
             value = None
-        elif token[0] == slice_l and token[-1] == slice_r:
+        elif token[0] == BRACKET_START_SYMBOL and token[-1] == BRACKET_END_SYMBOL:
             # token have slice delimiter, let's check if it is really a slice
-            if slice_separator in token:
+            if SLICE_OPERATOR_SYMBOL in token:
                 # it is slice if we found the slice separator
                 node_type = SLICE_NODE
-                value = slice(*[int(i) for i in token[1:-1].split(':') if i])
-            elif wildcard in token:
+                value = slice(*[int(i) for i in token[1:-1].split(SLICE_OPERATOR_SYMBOL) if i])
+            elif WILDCARD_SYMBOL in token:
                 # but it can also be a wildcard
                 node_type = WILDCARD_NODE
                 value = None
@@ -183,23 +193,29 @@ def parse(query):
                 try:
                     # or an index. let's check if the value is numeric
                     node_type = INDEX_NODE
-                    value = int(token[1:-1])
+                    value = [int(token[1:-1])]
                 except ValueError:
                     # it's not numeric, so it's an identifier
                     node_type = IDENTIFIER_NODE
                     value = token[1:-1].strip()
         else:
-            # everything els is an identifier
+            # everything else is an identifier
             node_type = IDENTIFIER_NODE
             value = token.strip()
-            if value == wildcard:
+            if value == WILDCARD_SYMBOL:
                 # except if it is a wildcard
                 node_type = WILDCARD_NODE
                 value = None
 
         if node_type == IDENTIFIER_NODE:
-            # we don't want the identifier value to be surrounded by quotes
-            value = value.strip(quotes)
+            try:
+                # try to split unions
+                value = value.split(UNION_OPERATOR_SYMBOL)
+                # we don't want the identifier value to be surrounded by quotes
+                value = [val.strip(QUOTES_SYMBOL + SPACE_SYMBOL) for val in value]
+            except AttributeError:
+                # failed to strip/split because value could be a list or an integer
+                pass
 
         nodes.append(Node(type=node_type, value=value))
 
