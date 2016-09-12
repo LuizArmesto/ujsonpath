@@ -1,6 +1,6 @@
 # coding: utf-8
 
-from jsonpath import tokenize
+from ujsonpath import tokenize
 
 
 class TestTokenize:

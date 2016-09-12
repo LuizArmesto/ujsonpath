@@ -2,7 +2,7 @@
 
 import pytest
 
-from jsonpath import parse
+from ujsonpath import parse
 
 
 @pytest.fixture

@@ -1,1 +1,7 @@
 -e .
+
+pytest
+pytest-cov
+pytest-watch
+tox
+virtualenv

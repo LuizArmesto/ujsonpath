@@ -1,7 +1,7 @@
 # coding: utf-8
 
-from jsonpath import parse
-from jsonpath import ROOT_NODE, WILDCARD_NODE, DESCENDANT_NODE, SLICE_NODE, INDEX_NODE, IDENTIFIER_NODE
+from ujsonpath import parse
+from ujsonpath import ROOT_NODE, WILDCARD_NODE, DESCENDANT_NODE, SLICE_NODE, INDEX_NODE, IDENTIFIER_NODE
 
 
 class TestParse:

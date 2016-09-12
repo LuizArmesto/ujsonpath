@@ -6,8 +6,8 @@ from os.path import dirname, join
 from setuptools import setup, find_packages
 from setuptools.command.test import test as TestCommand
 
-_name = 'jsonpath'
-_description = 'jsonpath implementation'
+_name = 'ujsonpath'
+_description = 'Fast JSONPath implementation'
 
 _install_requires = []
 _tests_require = [
