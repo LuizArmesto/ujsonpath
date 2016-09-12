@@ -14,3 +14,5 @@ script: py.test --cov --cov-report term-missing
 addons:
   code_climate:
     repo_token: 54085c17b0c35249a88ab0456297942196f8943c00f1cf282538eba8548779ad
+after_script:
+  - codeclimate-test-reporter
