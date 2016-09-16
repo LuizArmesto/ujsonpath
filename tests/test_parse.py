@@ -1,6 +1,7 @@
 # coding: utf-8
 
 from ujsonpath import parse
+from ujsonpath import UnionOperator, OrOperator
 from ujsonpath import ROOT_NODE, WILDCARD_NODE, DESCENDANT_NODE, SLICE_NODE, INDEX_NODE, IDENTIFIER_NODE
 
 
@@ -52,23 +53,44 @@ class TestParse:
 
     def test_parse_union(self):
         query = 'level1.level2[4,2].level3'
-        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2']), (INDEX_NODE, ['4', '2']), (IDENTIFIER_NODE, ['level3'])]
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2']), (INDEX_NODE, UnionOperator(['4', '2'])), (IDENTIFIER_NODE, ['level3'])]
         assert parse(query).nodes == expected_nodes
 
         query = 'level1.level2[4,2]'
-        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2']), (INDEX_NODE, ['4', '2'])]
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2']), (INDEX_NODE, UnionOperator(['4', '2']))]
         assert parse(query).nodes == expected_nodes
 
         query = 'level1.[level2a, level2b]'
-        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2a', 'level2b'])]
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, UnionOperator(['level2a', 'level2b']))]
         assert parse(query).nodes == expected_nodes
 
         query = 'level1.["level2a",level2b]'
-        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2a', 'level2b'])]
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, UnionOperator(['level2a', 'level2b']))]
         assert parse(query).nodes == expected_nodes
 
         query = "level1.['level2a',  'level2b']"
-        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2a', 'level2b'])]
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, UnionOperator(['level2a', 'level2b']))]
+        assert parse(query).nodes == expected_nodes
+
+    def test_parse_or(self):
+        query = 'level1.level2[4|2].level3'
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2']), (INDEX_NODE, OrOperator(['4', '2'])), (IDENTIFIER_NODE, ['level3'])]
+        assert parse(query).nodes == expected_nodes
+
+        query = 'level1.level2[4|2]'
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2']), (INDEX_NODE, OrOperator(['4', '2']))]
+        assert parse(query).nodes == expected_nodes
+
+        query = 'level1.[level2a | level2b]'
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, OrOperator(['level2a', 'level2b']))]
+        assert parse(query).nodes == expected_nodes
+
+        query = 'level1.["level2a"|level2b]'
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, OrOperator(['level2a', 'level2b']))]
+        assert parse(query).nodes == expected_nodes
+
+        query = "level1.['level2a'|  'level2b']"
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, OrOperator(['level2a', 'level2b']))]
         assert parse(query).nodes == expected_nodes
 
     def test_parse_index(self):

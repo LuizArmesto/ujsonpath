@@ -98,6 +98,16 @@ class TestFind:
         expected_values = ['Evelyn Waugh', 12.99, 'Herman Melville', 8.99, 'J. R. R. Tolkien', 22.99]
         assert [match.value for match in parse(query).find(store_json)] == expected_values
 
+    def test_find_books_author_or_title(self, store_json):
+        query = '$.store.book[*][author|title]'
+        expected_values = ['Nigel Rees', 'Evelyn Waugh', 'Herman Melville', 'J. R. R. Tolkien', 'The Hobit']
+        assert [match.value for match in parse(query).find(store_json)] == expected_values
+
+    def test_find_books_author_or_invalid_field_name(self, store_json):
+        query = '$.store.book[*][author|invalid_field_name]'
+        expected_values = ['Nigel Rees', 'Evelyn Waugh', 'Herman Melville', 'J. R. R. Tolkien']
+        assert [match.value for match in parse(query).find(store_json)] == expected_values
+
     def test_find_authors(self, store_json):
         query = 'store.book[*].author'
         expected_values = ['Nigel Rees', 'Evelyn Waugh', 'Herman Melville', 'J. R. R. Tolkien']

@@ -6,35 +6,55 @@ from collections import namedtuple
 
 # Symbols
 ROOT_SYMBOL = '$'
-SELF_SYMBOL = '@'  # TODO
+SELF_SYMBOL = '@'
 ESCAPE_SYMBOL = '\\'
 WILDCARD_SYMBOL = '*'
-DESCENDANT_SYMBOL = '..'  # TODO
+DESCENDANT_SYMBOL = '..'
 QUOTES_SYMBOL = '"\''
 SPACE_SYMBOL = ' '
 BRACKET_START_SYMBOL = '['
 BRACKET_END_SYMBOL = ']'
-EXPRESSION_START_SYMBOL = '('  # TODO
-EXPRESSION_END_SYMBOL = ')'  # TODO
+EXPRESSION_START_SYMBOL = '('
+EXPRESSION_END_SYMBOL = ')'
 SLICE_OPERATOR_SYMBOL = ':'
 UNION_OPERATOR_SYMBOL = ','
-FILTER_OPERATOR_SYMBOL = '?'  # TODO
+OR_OPERATOR_SYMBOL = '|'
+FILTER_OPERATOR_SYMBOL = '?'
 IDENTIFIER_SYMBOL = '.'
 
 
 # Node types
 ROOT_NODE = 'ROOT'
-SELF_NODE = 'SELF'  # TODO
+SELF_NODE = 'SELF'
 WILDCARD_NODE = 'WILDCARD'
-DESCENDANT_NODE = 'DESCENDANT'  # TODO
+DESCENDANT_NODE = 'DESCENDANT'
 SLICE_NODE = 'SLICE'
-EXPRESSION_NODE = 'EXPRESSION'  # TODO
-FILTER_NODE = 'FILTER'  # TODO
+EXPRESSION_NODE = 'EXPRESSION'
+FILTER_NODE = 'FILTER'
 INDEX_NODE = 'INDEX'
 IDENTIFIER_NODE = INDEX_NODE
 
 
 Node = namedtuple('Node', 'type, value')
+
+
+class Operator(object):
+    def __init__(self, identifiers):
+        self.identifiers = identifiers
+
+    def __eq__(self, other):
+        return self.identifiers == other.identifiers
+
+    def __getitem__(self, i):
+        return self.identifiers[i]
+
+
+class UnionOperator(Operator):
+    pass
+
+
+class OrOperator(Operator):
+    pass
 
 
 class MatchNotFound(object):
@@ -89,16 +109,24 @@ class JsonPath(object):
             value = [self._get_node_value(node, datum, root) for datum in data]
         elif node.type in (IDENTIFIER_NODE, INDEX_NODE):
             # both, identifier and index, can be accessed as a key
-            try:
-                # try to access directly
-                value = [Match(data.value[val], path) for val in node.value]
-            except (IndexError, KeyError, TypeError):
+            value = []
+            for val in node.value:
                 try:
-                    # try to convert to integer index
-                    value = [Match(data.value[int(val)], path) for val in node.value]
-                except (ValueError, IndexError, KeyError, TypeError):
-                    # both tries failed
-                    value = [MatchNotFound()]
+                    # try to access directly
+                    value.append(Match(data.value[val], None))
+                except (IndexError, KeyError, TypeError):
+                    try:
+                        # try to convert to integer index
+                        value.append(Match(data.value[int(val)], None))
+                    except (ValueError, IndexError, KeyError, TypeError):
+                        pass
+            if isinstance(node.value, OrOperator):
+                try:
+                    value = [value[0]]
+                except IndexError:
+                    pass
+            if not value:
+                value = [MatchNotFound()]
         elif node.type == SLICE_NODE:
             try:
                 value = [Match(val, path) for val in data.value[node.value]]
@@ -142,13 +170,13 @@ def tokenize(query):
     query = query.strip()
     for char in query:
         if escaped:
-            if char in UNION_OPERATOR_SYMBOL + SLICE_OPERATOR_SYMBOL:
+            if char in UNION_OPERATOR_SYMBOL + SLICE_OPERATOR_SYMBOL + OR_OPERATOR_SYMBOL:
                 # don't remove escape from union symbol because unions will be evaluated later
                 token += ESCAPE_SYMBOL
             escaped = False
             token += char
         elif quoted:
-            if char in UNION_OPERATOR_SYMBOL + SLICE_OPERATOR_SYMBOL + ESCAPE_SYMBOL:
+            if char in UNION_OPERATOR_SYMBOL + SLICE_OPERATOR_SYMBOL + OR_OPERATOR_SYMBOL + ESCAPE_SYMBOL:
                 # escape special symbols used inside quotation
                 token += ESCAPE_SYMBOL
             if char == quote_used:
@@ -239,12 +267,25 @@ def parse(query):
             try:
                 # try to split unions
                 value = escaped_split(value, UNION_OPERATOR_SYMBOL)
+                if len(value) > 1:
+                    operator = UnionOperator
+                else:
+                    value = escaped_split(value[0], OR_OPERATOR_SYMBOL)
+                    if len(value) > 1:
+                        operator = OrOperator
+                    else:
+                        operator = list
+
                 value = [val.strip(SPACE_SYMBOL) for val in value]
                 # unescape union and slide operators
                 value = [val.replace(
                     ESCAPE_SYMBOL + ESCAPE_SYMBOL, ESCAPE_SYMBOL).replace(
                     ESCAPE_SYMBOL + UNION_OPERATOR_SYMBOL, UNION_OPERATOR_SYMBOL).replace(
-                    ESCAPE_SYMBOL + SLICE_OPERATOR_SYMBOL, SLICE_OPERATOR_SYMBOL) for val in value]
+                    ESCAPE_SYMBOL + OR_OPERATOR_SYMBOL, OR_OPERATOR_SYMBOL).replace(
+                    ESCAPE_SYMBOL + SLICE_OPERATOR_SYMBOL, SLICE_OPERATOR_SYMBOL
+                ) for val in value]
+
+                value = operator(value)
             except AttributeError:
                 # failed to strip/split because value could be a list or an integer
                 pass

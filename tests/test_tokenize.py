@@ -68,8 +68,8 @@ class TestTokenize:
         assert list(tokenize(query)) == expected_tokens
 
     def test_tokenize_quoted_identifiers(self):
-        query = 'level1.level2["$.level3[0,1]\\[:-1]"]'
-        expected_tokens = ['level1', 'level2', '[$.level3[0\\,1]\\\\[\\:-1]]']
+        query = 'level1.level2["$.level3[0,1]\\[:-1]|a"]'
+        expected_tokens = ['level1', 'level2', '[$.level3[0\\,1]\\\\[\\:-1]\\|a]']
         assert list(tokenize(query)) == expected_tokens
 
     def test_tokenize_escaped_union(self):
@@ -80,6 +80,16 @@ class TestTokenize:
     def test_tokenize_quoted_union(self):
         query = 'level1.level2["level3,1"]'
         expected_tokens = ['level1', 'level2', '[level3\\,1]']
+        assert list(tokenize(query)) == expected_tokens
+
+    def test_tokenize_escaped_or(self):
+        query = 'level1.level2[level3a\\|level3b]'
+        expected_tokens = ['level1', 'level2', '[level3a\\|level3b]']
+        assert list(tokenize(query)) == expected_tokens
+
+    def test_tokenize_quoted_or(self):
+        query = 'level1.level2["level3.a|level3.b"]'
+        expected_tokens = ['level1', 'level2', '[level3.a\\|level3.b]']
         assert list(tokenize(query)) == expected_tokens
 
     def test_tokenize_quotes(self):
