@@ -93,65 +93,66 @@ class JsonPath(object):
         while nodes:
             node = nodes[0]
             nodes = nodes[1:]
-            node_value = self._get_node_value(node, data, root)
+            node_value = _get_node_value(node, data, root)
             data = node_value
             if not nodes:
                 values = node_value
 
         return [value for value in values if not isinstance(value, MatchNotFound)]
 
-    def _get_node_value(self, node, data, root):
-        path = None
-        if node.type == ROOT_NODE:
-            value = root
-        elif isinstance(data, list):
-            # data can be a Match object or a list of Match objects
-            value = [self._get_node_value(node, datum, root) for datum in data]
-        elif node.type in (IDENTIFIER_NODE, INDEX_NODE):
-            # both, identifier and index, can be accessed as a key
-            value = []
-            for val in node.value:
-                try:
-                    # try to access directly
-                    value.append(Match(data.value[val], None))
-                except (IndexError, KeyError, TypeError):
-                    try:
-                        # try to convert to integer index
-                        value.append(Match(data.value[int(val)], None))
-                    except (ValueError, IndexError, KeyError, TypeError):
-                        pass
-            if isinstance(node.value, OrOperator):
-                try:
-                    value = [value[0]]
-                except IndexError:
-                    pass
-            if not value:
-                value = [MatchNotFound()]
-        elif node.type == SLICE_NODE:
+
+def _get_node_value(node, data, root):
+    path = None
+    if node.type == ROOT_NODE:
+        value = root
+    elif isinstance(data, list):
+        # data can be a Match object or a list of Match objects
+        value = [_get_node_value(node, datum, root) for datum in data]
+    elif node.type in (IDENTIFIER_NODE, INDEX_NODE):
+        # both, identifier and index, can be accessed as a key
+        value = []
+        for val in node.value:
             try:
-                value = [Match(val, path) for val in data.value[node.value]]
-            except (KeyError, TypeError):
-                value = [MatchNotFound()]
-        elif node.type == WILDCARD_NODE:
-            # wildcard should work for lists and dicts
-            data = data.value
-            if isinstance(data, list):
-                value = [Match(val, path) for val in data]
-            elif isinstance(data, dict):
-                value = [Match(val, path) for val in data.values()]
-            else:
-                value = [MatchNotFound()]
-        elif node.type == DESCENDANT_NODE:
-            raise NotImplementedError('Descendant is not implemented')
-        else:  # pragma: no cover
-            raise ValueError('Unknown node type: {}'.format(node.type))
+                # try to access directly
+                value.append(Match(data.value[val], None))
+            except (IndexError, KeyError, TypeError):
+                try:
+                    # try to convert to integer index
+                    value.append(Match(data.value[int(val)], None))
+                except (ValueError, IndexError, KeyError, TypeError):
+                    pass
+        if isinstance(node.value, OrOperator):
+            try:
+                value = [value[0]]
+            except IndexError:
+                pass
+        if not value:
+            value = [MatchNotFound()]
+    elif node.type == SLICE_NODE:
+        try:
+            value = [Match(val, path) for val in data.value[node.value]]
+        except (KeyError, TypeError):
+            value = [MatchNotFound()]
+    elif node.type == WILDCARD_NODE:
+        # wildcard should work for lists and dicts
+        data = data.value
+        if isinstance(data, list):
+            value = [Match(val, path) for val in data]
+        elif isinstance(data, dict):
+            value = [Match(val, path) for val in data.values()]
+        else:
+            value = [MatchNotFound()]
+    elif node.type == DESCENDANT_NODE:
+        raise NotImplementedError('Descendant is not implemented')
+    else:  # pragma: no cover
+        raise ValueError('Unknown node type: {}'.format(node.type))
 
-        if isinstance(value, list) and len(value) >= 1 and isinstance(value[0], list):
-            # if the original query have more than one wildcard, we can get a list of lists
-            # but we want a flat list
-            value = [item for sublist in value for item in sublist]
+    if isinstance(value, list) and len(value) >= 1 and isinstance(value[0], list):
+        # if the original query have more than one wildcard, we can get a list of lists
+        # but we want a flat list
+        value = [item for sublist in value for item in sublist]
 
-        return value
+    return value
 
 
 def tokenize(query):
