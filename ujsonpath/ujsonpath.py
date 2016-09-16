@@ -295,14 +295,15 @@ def parse(query):
     return JsonPath(nodes)
 
 
+def clean_list(data, exclude=('',)):
+    return [val.strip() for val in data if val not in exclude]
+
+
 def escaped_split(string, char):
-    sections = string.split(char)
-    if ESCAPE_SYMBOL not in string:
-        return sections
-    sections = [section + (char if section and section[-1] == ESCAPE_SYMBOL else '') for section in sections]
-    result = ['' for _ in sections]
+    sections = [section + (char if section.endswith(ESCAPE_SYMBOL) else '') for section in string.split(char)]
+    result = [''] * len(sections)
     idx = 0
     for section in sections:
         result[idx] += section
-        idx += (1 if section and section[-1] != char else 0)
-    return [val.strip() for val in result if val != '']
+        idx += int(not section.endswith(char))
+    return clean_list(result)
