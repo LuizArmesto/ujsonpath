@@ -2,7 +2,7 @@
 
 from ujsonpath import parse
 from ujsonpath import UnionOperator, OrOperator
-from ujsonpath import ROOT_NODE, WILDCARD_NODE, DESCENDANT_NODE, SLICE_NODE, INDEX_NODE, IDENTIFIER_NODE
+from ujsonpath import ROOT_NODE, WILDCARD_NODE, DESCENDANT_NODE, SLICE_NODE, INDEX_NODE, IDENTIFIER_NODE, EXPRESSION_NODE, FILTER_NODE
 
 
 class TestParse:
@@ -167,4 +167,14 @@ class TestParse:
     def test_parse_invalid_slice(self):
         query = 'level1.level2[a:3].level3'
         expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2']), (IDENTIFIER_NODE, ['a:3']), (IDENTIFIER_NODE, ['level3'])]
+        assert parse(query).nodes == expected_nodes
+
+    def test_parse_expression(self):
+        query = 'level1.level2[(@.length-1)]'
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2']), (EXPRESSION_NODE, '@.length-1')]
+        assert parse(query).nodes == expected_nodes
+
+    def test_parse_filter(self):
+        query = 'level1.level2[?(@.price==8.95)]'
+        expected_nodes = [(IDENTIFIER_NODE, ['level1']), (IDENTIFIER_NODE, ['level2']), (FILTER_NODE, '@.price==8.95')]
         assert parse(query).nodes == expected_nodes

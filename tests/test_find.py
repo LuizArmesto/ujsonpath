@@ -130,6 +130,16 @@ class TestFind:
         with pytest.raises(NotImplementedError):
             parse(query).find(store_json)
 
+    def test_find_book_filtered_by_prices(self, store_json):
+        query = '$store.book[?(@.price==8.95)]'
+        with pytest.raises(NotImplementedError):
+            parse(query).find(store_json)
+
+    def test_last_book_using_expression(self, store_json):
+        query = '$store.book[(@.length-1)]'
+        with pytest.raises(NotImplementedError):
+            parse(query).find(store_json)
+
     def test_find_multiple_wildcard(self):
         data = {
             "level1": [

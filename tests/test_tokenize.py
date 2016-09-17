@@ -145,3 +145,17 @@ class TestTokenize:
         query = 'level1.level2[1:3]'
         expected_tokens = ['level1', 'level2', '[1:3]']
         assert list(tokenize(query)) == expected_tokens
+
+    def test_tokenize_expression(self):
+        query = 'level1.level2[(@.length-1)]'
+        expected_tokens = ['level1', 'level2', '[(@.length-1)]']
+        assert list(tokenize(query)) == expected_tokens
+
+    def test_tokenize_filter(self):
+        query = 'level1.level2[?(@.price==8.95)]'
+        expected_tokens = ['level1', 'level2', '[?(@.price==8.95)]']
+        assert list(tokenize(query)) == expected_tokens
+
+        query = 'level1.level2[?(@.price<30 && @.category=="fiction")]'
+        expected_tokens = ['level1', 'level2', '[?(@.price<30 && @.category=="fiction")]']
+        assert list(tokenize(query)) == expected_tokens

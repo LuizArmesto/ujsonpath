@@ -144,6 +144,10 @@ def _get_node_value(node, data, root):
             value = [MatchNotFound()]
     elif node.type == DESCENDANT_NODE:
         raise NotImplementedError('Descendant is not implemented')
+    elif node.type == EXPRESSION_NODE:
+        raise NotImplementedError('Expressions are not implemented')
+    elif node.type == FILTER_NODE:
+        raise NotImplementedError('Filters are not implemented')
     else:  # pragma: no cover
         raise ValueError('Unknown node type: {}'.format(node.type))
 
@@ -166,6 +170,8 @@ def tokenize(query):
     token = ''
     escaped = False
     quoted = False
+    bracketed = False
+    expression = False
     quote_used = ''
 
     query = query.strip()
@@ -182,6 +188,8 @@ def tokenize(query):
                 token += ESCAPE_SYMBOL
             if char == quote_used:
                 quoted = False
+                if expression:
+                    token += char
             else:
                 token += char
         elif char in ESCAPE_SYMBOL:
@@ -189,6 +197,26 @@ def tokenize(query):
         elif char in QUOTES_SYMBOL:
             quote_used = char
             quoted = not quoted
+            if expression:
+                token += char
+        elif char in BRACKET_START_SYMBOL:
+            if token:
+                yield token
+            bracketed = True
+            token = char
+        elif char in BRACKET_END_SYMBOL:
+            token += char
+            yield token
+            token = ''
+            bracketed = False
+        elif char in EXPRESSION_START_SYMBOL:
+            expression = True
+            token += char
+        elif char in EXPRESSION_END_SYMBOL:
+            expression = False
+            token += char
+        elif bracketed:
+            token += char
         elif char in ROOT_SYMBOL:
             yield char
             token = ''
@@ -197,14 +225,6 @@ def tokenize(query):
                 yield char + char
             elif token:
                 yield token
-            token = ''
-        elif char in BRACKET_START_SYMBOL:
-            if token:
-                yield token
-            token = char
-        elif char in BRACKET_END_SYMBOL:
-            token += char
-            yield token
             token = ''
         else:
             token += char
@@ -246,6 +266,12 @@ def parse(query):
                 # but it can also be a wildcard
                 node_type = WILDCARD_NODE
                 value = None
+            elif token[1] == EXPRESSION_START_SYMBOL and token[-2] == EXPRESSION_END_SYMBOL:
+                node_type = EXPRESSION_NODE
+                value = token[2:-2]
+            elif token[1] in FILTER_OPERATOR_SYMBOL and token[2] == EXPRESSION_START_SYMBOL and token[-2] == EXPRESSION_END_SYMBOL:
+                node_type = FILTER_NODE
+                value = token[3:-2]
             else:
                 try:
                     # or an index. let's check if the value is numeric
