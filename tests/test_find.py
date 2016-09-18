@@ -83,6 +83,10 @@ class TestFind:
         expected_values = ['Evelyn Waugh', 'Herman Melville']
         assert [match.value for match in parse(query).find(store_json)] == expected_values
 
+        query = '$.store.book.1:-2.author'
+        expected_values = ['Evelyn Waugh', 'Herman Melville']
+        assert [match.value for match in parse(query).find(store_json)] == expected_values
+
     def test_find_slice_a_map(self, store_json):
         query = '$.store[1:-2]'
         expected_values = []
@@ -90,6 +94,10 @@ class TestFind:
 
     def test_find_books_author_union(self, store_json):
         query = '$.store.book[1,2,3].author'
+        expected_values = ['Evelyn Waugh', 'Herman Melville', 'J. R. R. Tolkien']
+        assert [match.value for match in parse(query).find(store_json)] == expected_values
+
+        query = '$.store.book.1,2,3.author'
         expected_values = ['Evelyn Waugh', 'Herman Melville', 'J. R. R. Tolkien']
         assert [match.value for match in parse(query).find(store_json)] == expected_values
 

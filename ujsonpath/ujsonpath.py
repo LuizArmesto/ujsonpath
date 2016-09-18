@@ -276,8 +276,7 @@ def generate_tokens(query):
 
         previous_char = char
 
-    if token:
-        yield token
+    yield token
 
 
 def tokenize(query):
