@@ -24,15 +24,83 @@ IDENTIFIER_SYMBOL = '.'
 
 
 # Node types
-ROOT_NODE = 'ROOT'
-SELF_NODE = 'SELF'
-WILDCARD_NODE = 'WILDCARD'
-DESCENDANT_NODE = 'DESCENDANT'
-SLICE_NODE = 'SLICE'
-EXPRESSION_NODE = 'EXPRESSION'
-FILTER_NODE = 'FILTER'
-INDEX_NODE = 'INDEX'
-IDENTIFIER_NODE = INDEX_NODE
+class BaseNodeType(object):
+    @staticmethod
+    def get_value(node, data, root):
+        raise NotImplementedError()
+
+class RootNodeType(BaseNodeType):
+    @staticmethod
+    def get_value(node, data, root):
+        return [root]
+
+
+class SelfNodeType(BaseNodeType):
+    pass
+
+
+class WildcardNodeType(BaseNodeType):
+    @staticmethod
+    def get_value(node, data, root):
+        # wildcard should work for lists and dicts
+        data = data.value
+        if isinstance(data, list):
+            value = [Match(val, None) for val in data]
+        elif isinstance(data, dict):
+            value = [Match(val, None) for val in data.values()]
+        else:
+            value = [MatchNotFound()]
+        return value
+
+
+class DescendantNodeType(BaseNodeType):
+    pass
+
+
+class SliceNodeType(BaseNodeType):
+    @staticmethod
+    def get_value(node, data, root):
+        try:
+            value = [Match(val, None) for val in data.value[node.value]]
+        except (KeyError, TypeError):
+            value = [MatchNotFound()]
+        return value
+
+
+class ExpressionNodeType(BaseNodeType):
+    pass
+
+
+class FilterNodeType(BaseNodeType):
+    pass
+
+
+class IndexNodeType(BaseNodeType):
+    @staticmethod
+    def get_value(node, data, root):
+        # both, identifier and index, can be accessed as a key
+        value = []
+        for val in node.value:
+            try:
+                # try to access directly
+                value.append(Match(data.value[val], None))
+            except (IndexError, KeyError, TypeError):
+                try:
+                    # try to convert to integer index
+                    value.append(Match(data.value[int(val)], None))
+                except (ValueError, IndexError, KeyError, TypeError):
+                    pass
+        if isinstance(node.value, OrOperator):
+            try:
+                value = [value[0]]
+            except IndexError:
+                pass
+        if not value:
+            value = [MatchNotFound()]
+        return value
+
+
+IdentifierNodeType = IndexNodeType
 
 
 Node = namedtuple('Node', 'type, value')
@@ -93,7 +161,7 @@ class JsonPath(object):
         while nodes:
             node = nodes[0]
             nodes = nodes[1:]
-            node_value = _get_node_value(node, data, root)
+            node_value = get_node_value(node, data, root)
             data = node_value
             if not nodes:
                 values = node_value
@@ -101,61 +169,14 @@ class JsonPath(object):
         return [value for value in values if not isinstance(value, MatchNotFound)]
 
 
-def _get_node_value(node, data, root):
-    path = None
-    if node.type == ROOT_NODE:
-        value = root
-    elif isinstance(data, list):
-        # data can be a Match object or a list of Match objects
-        value = [_get_node_value(node, datum, root) for datum in data]
-    elif node.type in (IDENTIFIER_NODE, INDEX_NODE):
-        # both, identifier and index, can be accessed as a key
-        value = []
-        for val in node.value:
-            try:
-                # try to access directly
-                value.append(Match(data.value[val], None))
-            except (IndexError, KeyError, TypeError):
-                try:
-                    # try to convert to integer index
-                    value.append(Match(data.value[int(val)], None))
-                except (ValueError, IndexError, KeyError, TypeError):
-                    pass
-        if isinstance(node.value, OrOperator):
-            try:
-                value = [value[0]]
-            except IndexError:
-                pass
-        if not value:
-            value = [MatchNotFound()]
-    elif node.type == SLICE_NODE:
-        try:
-            value = [Match(val, path) for val in data.value[node.value]]
-        except (KeyError, TypeError):
-            value = [MatchNotFound()]
-    elif node.type == WILDCARD_NODE:
-        # wildcard should work for lists and dicts
-        data = data.value
-        if isinstance(data, list):
-            value = [Match(val, path) for val in data]
-        elif isinstance(data, dict):
-            value = [Match(val, path) for val in data.values()]
-        else:
-            value = [MatchNotFound()]
-    elif node.type == DESCENDANT_NODE:
-        raise NotImplementedError('Descendant is not implemented')
-    elif node.type == EXPRESSION_NODE:
-        raise NotImplementedError('Expressions are not implemented')
-    elif node.type == FILTER_NODE:
-        raise NotImplementedError('Filters are not implemented')
-    else:  # pragma: no cover
-        raise ValueError('Unknown node type: {}'.format(node.type))
-
-    if isinstance(value, list) and len(value) >= 1 and isinstance(value[0], list):
-        # if the original query have more than one wildcard, we can get a list of lists
-        # but we want a flat list
-        value = [item for sublist in value for item in sublist]
-
+def get_node_value(node, data, root):
+    try:
+        value = [get_node_value(node, datum, root) for datum in data]
+    except TypeError:
+        value = node.type.get_value(node, data, root)
+    # if the original query have more than one wildcard, we can get a list of lists
+    # but we want a flat list
+    value = _join_lists(value)
     return value
 
 
@@ -247,50 +268,50 @@ def parse(query):
 
     for token in tokens:
         if token == ROOT_SYMBOL:
-            node_type = ROOT_NODE
+            node_type = RootNodeType
             value = None
         elif token == DESCENDANT_SYMBOL:
-            node_type = DESCENDANT_NODE
+            node_type = DescendantNodeType
             value = None
         elif token[0] == BRACKET_START_SYMBOL and token[-1] == BRACKET_END_SYMBOL:
             # token have not escaped slice delimiter, let's check if it is really a slice
             if SLICE_OPERATOR_SYMBOL in token.replace('\\' + SLICE_OPERATOR_SYMBOL, ''):
                 # it is slice if we found the slice separator
-                node_type = SLICE_NODE
+                node_type = SliceNodeType
                 try:
                     value = slice(*[int(i) for i in token[1:-1].split(SLICE_OPERATOR_SYMBOL) if i])
                 except ValueError:
-                    node_type = IDENTIFIER_NODE
+                    node_type = IdentifierNodeType
                     value = token[1:-1]
             elif WILDCARD_SYMBOL in token:
                 # but it can also be a wildcard
-                node_type = WILDCARD_NODE
+                node_type = WildcardNodeType
                 value = None
             elif token[1] == EXPRESSION_START_SYMBOL and token[-2] == EXPRESSION_END_SYMBOL:
-                node_type = EXPRESSION_NODE
+                node_type = ExpressionNodeType
                 value = token[2:-2]
             elif token[1] in FILTER_OPERATOR_SYMBOL and token[2] == EXPRESSION_START_SYMBOL and token[-2] == EXPRESSION_END_SYMBOL:
-                node_type = FILTER_NODE
+                node_type = FilterNodeType
                 value = token[3:-2]
             else:
                 try:
                     # or an index. let's check if the value is numeric
-                    node_type = INDEX_NODE
+                    node_type = IndexNodeType
                     value = [int(token[1:-1])]
                 except ValueError:
                     # it's not numeric, so it's an identifier
-                    node_type = IDENTIFIER_NODE
+                    node_type = IdentifierNodeType
                     value = token[1:-1].strip()
         else:
             # everything else is an identifier
-            node_type = IDENTIFIER_NODE
+            node_type = IdentifierNodeType
             value = token.strip()
             if value == WILDCARD_SYMBOL:
                 # except if it is a wildcard
-                node_type = WILDCARD_NODE
+                node_type = WildcardNodeType
                 value = None
 
-        if node_type == IDENTIFIER_NODE:
+        if node_type == IdentifierNodeType:
             try:
                 # try to split unions
                 value = escaped_split(value, UNION_OPERATOR_SYMBOL)
@@ -320,6 +341,14 @@ def parse(query):
         nodes.append(Node(type=node_type, value=value))
 
     return JsonPath(nodes)
+
+
+def _join_lists(value):
+    try:
+        value = [item for sublist in value for item in sublist]
+    except TypeError:
+        pass
+    return value
 
 
 def clean_list(data, exclude=('',)):
