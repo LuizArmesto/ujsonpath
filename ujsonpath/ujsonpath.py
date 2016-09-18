@@ -3,14 +3,15 @@
 import json
 from collections import namedtuple
 
-
 # Symbols
 ROOT_SYMBOL = '$'
 SELF_SYMBOL = '@'
 ESCAPE_SYMBOL = '\\'
 WILDCARD_SYMBOL = '*'
 DESCENDANT_SYMBOL = '..'
-QUOTES_SYMBOL = '"\''
+SINGLE_QUOTE_SYMBOL = '\''
+DOUBLE_QUOTE_SYMBOL = '"'
+QUOTES_SYMBOL = SINGLE_QUOTE_SYMBOL + DOUBLE_QUOTE_SYMBOL
 SPACE_SYMBOL = ' '
 BRACKET_START_SYMBOL = '['
 BRACKET_END_SYMBOL = ']'
@@ -32,6 +33,7 @@ class BaseNodeType(object):
     @classmethod
     def evaluate(cls, node, data, root):
         raise NotImplementedError()
+
 
 class RootNodeType(BaseNodeType):
     @classmethod
@@ -80,10 +82,12 @@ class ExpressionNodeType(BaseNodeType):
     def process_value(cls, value):
         return value[1:-1]
 
+
 class FilterNodeType(BaseNodeType):
     @classmethod
     def process_value(cls, value):
         return value[2:-1]
+
 
 class IndexNodeType(BaseNodeType):
     @classmethod
@@ -100,12 +104,13 @@ class IndexNodeType(BaseNodeType):
                 operator = list
 
         value = clean_list(value)
-        # unescape union and slide operators
-        value = [val.replace(
+        # unescape special chars from itentifier
+        value = [unquote(val).replace(
             ESCAPE_SYMBOL + ESCAPE_SYMBOL, ESCAPE_SYMBOL).replace(
             ESCAPE_SYMBOL + UNION_OPERATOR_SYMBOL, UNION_OPERATOR_SYMBOL).replace(
             ESCAPE_SYMBOL + OR_OPERATOR_SYMBOL, OR_OPERATOR_SYMBOL).replace(
             ESCAPE_SYMBOL + SLICE_OPERATOR_SYMBOL, SLICE_OPERATOR_SYMBOL).replace(
+            ESCAPE_SYMBOL + IDENTIFIER_SYMBOL, IDENTIFIER_SYMBOL).replace(
             ESCAPE_SYMBOL + ROOT_SYMBOL, ROOT_SYMBOL
         ) for val in value]
 
@@ -147,6 +152,9 @@ class Operator(object):
 
     def __getitem__(self, i):
         return self.identifiers[i]
+
+    def __repr__(self):
+        return '{}{}'.format(self.__class__.__name__, self.identifiers)
 
     def transform(self, value):
         raise NotImplementedError()
@@ -190,7 +198,7 @@ class JsonPath(object):
         self.nodes = nodes
 
     def __repr__(self):
-        return u'JsonPath(nodes={nodes})'.format(nodes=json.dumps(self.nodes))
+        return u'JsonPath(nodes={nodes})'.format(nodes=self.nodes)
 
     def find(self, data):
         data = Match(data, ROOT_SYMBOL)
@@ -201,7 +209,7 @@ class JsonPath(object):
         while nodes:
             node = nodes[0]
             nodes = nodes[1:]
-            node_value = get_node_value(node, data, root)
+            node_value = _evaluate_node(node, data, root)
             data = node_value
             if not nodes:
                 values = node_value
@@ -209,20 +217,19 @@ class JsonPath(object):
         return [value for value in values if not isinstance(value, MatchNotFound)]
 
 
-def get_node_value(node, data, root):
+def _evaluate_node(node, data, root):
     try:
-        value = [get_node_value(node, datum, root) for datum in data]
+        value = [_evaluate_node(node, datum, root) for datum in data]
     except TypeError:
         value = node.type.evaluate(node, data, root)
     # if the original query have more than one wildcard, we can get a list of lists
     # but we want a flat list
-    value = _join_lists(value)
+    value = join_lists(value)
     if not value:
         value = [MatchNotFound()]
     return value
 
-
-def tokenize(query):
+def generate_tokens(query):
     """
     Extract a list of tokens from query.
     :param query: string
@@ -233,61 +240,36 @@ def tokenize(query):
     token = ''
     escaped = False
     quoted = False
-    bracketed = False
-    expression = False
     quote_used = ''
+
+    quotes = {
+        SINGLE_QUOTE_SYMBOL: SINGLE_QUOTE_SYMBOL,
+        DOUBLE_QUOTE_SYMBOL: DOUBLE_QUOTE_SYMBOL,
+        EXPRESSION_START_SYMBOL: EXPRESSION_END_SYMBOL,
+    }
 
     query = query.strip()
     for char in query:
         if escaped:
-            if char in UNION_OPERATOR_SYMBOL + SLICE_OPERATOR_SYMBOL + OR_OPERATOR_SYMBOL:
-                # don't remove escape from union symbol because unions will be evaluated later
-                token += ESCAPE_SYMBOL
             escaped = False
             token += char
         elif quoted:
-            if char in UNION_OPERATOR_SYMBOL + SLICE_OPERATOR_SYMBOL + OR_OPERATOR_SYMBOL + ESCAPE_SYMBOL + ROOT_SYMBOL:
+            if char in (UNION_OPERATOR_SYMBOL, SLICE_OPERATOR_SYMBOL, OR_OPERATOR_SYMBOL, ESCAPE_SYMBOL):
                 # escape special symbols used inside quotation
                 token += ESCAPE_SYMBOL
-            if char == quote_used:
-                quoted = False
-                if expression:
-                    token += char
-            else:
-                token += char
+            quoted = not char == quotes[quote_used]
+            token += char
         elif char in ESCAPE_SYMBOL:
             escaped = True
-        elif char in QUOTES_SYMBOL:
+            token += char
+        elif char in quotes:
             quote_used = char
-            quoted = not quoted
-            if expression:
-                token += char
-        elif char in BRACKET_START_SYMBOL:
-            if token:
-                yield token
-            bracketed = True
-            token = char
-        elif char in BRACKET_END_SYMBOL:
+            quoted = True
             token += char
+        elif previous_char + char == DESCENDANT_SYMBOL:
+            yield DESCENDANT_SYMBOL
+        elif char in (IDENTIFIER_SYMBOL, BRACKET_START_SYMBOL, BRACKET_END_SYMBOL):
             yield token
-            token = ''
-            bracketed = False
-        elif char in EXPRESSION_START_SYMBOL:
-            expression = True
-            token += char
-        elif char in EXPRESSION_END_SYMBOL:
-            expression = False
-            token += char
-        elif bracketed:
-            token += char
-        elif char in ROOT_SYMBOL:
-            yield char
-            token = ''
-        elif char in IDENTIFIER_SYMBOL:
-            if previous_char and previous_char in IDENTIFIER_SYMBOL:
-                yield char + char
-            elif token:
-                yield token
             token = ''
         else:
             token += char
@@ -298,46 +280,31 @@ def tokenize(query):
         yield token
 
 
-class Parser(object):
-    def __init__(self, tokens):
-        self.tokens = tokens
+def tokenize(query):
+    tokens = list(generate_tokens(query))
+    tokens = clean_list(tokens, exclude=('', ))  # remove empty strings
+    return tokens
 
-    def _get_node_type(self, token):
-        node_types = {
-            ROOT_SYMBOL: RootNodeType,
-            DESCENDANT_SYMBOL: DescendantNodeType,
-            FILTER_OPERATOR_SYMBOL: FilterNodeType,
-            EXPRESSION_START_SYMBOL: ExpressionNodeType,
-            WILDCARD_SYMBOL: WildcardNodeType
-        }
-        node_type = node_types.get(token.strip(), None)
-        value = token
-        if not node_type:
-            if token[0] == BRACKET_START_SYMBOL and token[-1] == BRACKET_END_SYMBOL:
-                value = token[1:-1]
-                # token have not escaped slice delimiter, let's check if it is really a slice
-                if SLICE_OPERATOR_SYMBOL in value.replace('\\' + SLICE_OPERATOR_SYMBOL, ''):
-                    # it is slice if we found the slice separator
-                    node_type = SliceNodeType
-                else:
-                    node_type = node_types.get(value[0], IdentifierNodeType)
-            else:
-                # everything else is an identifier
-                node_type = IdentifierNodeType
-        return node_type, value
 
-    def parse(self):
-        nodes = []
-        for token in self.tokens:
-            node_type, value = self._get_node_type(token)
-            try:
-                value = node_type.process_value(value)
-            except ValueError:
-                node_type = IdentifierNodeType
-                value = node_type.process_value(value)
-
-            nodes.append(Node(type=node_type, value=value))
-        return nodes
+def _get_node_type(token):
+    node_types = {
+        ROOT_SYMBOL: RootNodeType,
+        DESCENDANT_SYMBOL: DescendantNodeType,
+        FILTER_OPERATOR_SYMBOL: FilterNodeType,
+        EXPRESSION_START_SYMBOL: ExpressionNodeType,
+        WILDCARD_SYMBOL: WildcardNodeType,
+        SINGLE_QUOTE_SYMBOL: IdentifierNodeType,
+        DOUBLE_QUOTE_SYMBOL: IdentifierNodeType,
+    }
+    node_type = node_types.get(token.strip(), None)
+    value = token
+    if not node_type:
+        if SLICE_OPERATOR_SYMBOL in value.replace('\\' + SLICE_OPERATOR_SYMBOL, ''):
+            # it is slice if we found the slice separator
+            node_type = SliceNodeType
+        else:
+            node_type = node_types.get(value[0], IdentifierNodeType)
+    return node_type, value
 
 
 def parse(query):
@@ -346,12 +313,21 @@ def parse(query):
     :param query: string
     :return: JsonPath object
     """
-    tokens = list(tokenize(query))
-    nodes = Parser(tokens).parse()
+    nodes = []
+    tokens = tokenize(query)
+    for token in tokens:
+        node_type, value = _get_node_type(token)
+        try:
+            value = node_type.process_value(value)
+        except ValueError:
+            node_type = IdentifierNodeType
+            value = node_type.process_value(value)
+
+        nodes.append(Node(type=node_type, value=value))
     return JsonPath(nodes)
 
 
-def _join_lists(value):
+def join_lists(value):
     try:
         value = [item for sublist in value for item in sublist]
     except TypeError:
@@ -378,3 +354,12 @@ def escaped_split(string, char):
         result[idx] += section
         idx += int(not section.endswith(char))
     return clean_list(result, exclude=('',))
+
+
+def unquote(string):
+    result = string
+    try:
+        if string[0] in QUOTES_SYMBOL and string[0] == string[-1]:
+            result = string[1:-1]
+    finally:
+        return result
