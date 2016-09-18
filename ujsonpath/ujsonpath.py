@@ -52,9 +52,9 @@ class WildcardNodeType(BaseNodeType):
         data = data.value
         # wildcard should work for lists and dicts
         if isinstance(data, list):
-            value = [Match(val, '{}[{}]'.format(basepath, idx)) for idx, val in enumerate(data)]
+            value = [Match(val, '{0}[{1}]'.format(basepath, idx)) for idx, val in enumerate(data)]
         elif isinstance(data, dict):
-            value = [Match(val, '{}["{}"]'.format(basepath, key.replace('"', '\\"'))) for key, val in data.items()]
+            value = [Match(val, '{0}["{1}"]'.format(basepath, key.replace('"', '\\"'))) for key, val in data.items()]
         else:
             value = [MatchNotFound()]
         return value
@@ -74,7 +74,7 @@ class SliceNodeType(BaseNodeType):
         basepath = data.path
         try:
             indices = range(len(data.value))
-            value = [Match(val, '{}[{}]'.format(basepath, idx))
+            value = [Match(val, '{0}[{1}]'.format(basepath, idx))
                      for idx, val in zip(indices[node.value], data.value[node.value])]
         except (KeyError, TypeError):
             value = [MatchNotFound()]
@@ -131,13 +131,13 @@ class IndexNodeType(BaseNodeType):
         for val in node.value:
             try:
                 # try to access directly
-                path = '{}["{}"]'.format(basepath, val.replace('"', '\\"'))
+                path = '{0}["{1}"]'.format(basepath, val.replace('"', '\\"'))
                 value.append(Match(data.value[val], path))
             except (IndexError, KeyError, TypeError):
                 try:
                     # try to convert key to integer
                     val = int(val)
-                    path = '{}[{}]'.format(basepath, val)
+                    path = '{0}[{1}]'.format(basepath, val)
                     value.append(Match(data.value[val], path))
                 except (ValueError, IndexError, KeyError, TypeError):
                     # Match not found... try next
@@ -164,7 +164,7 @@ class Operator(object):
         return self.identifiers[i]
 
     def __repr__(self):
-        return '{}{}'.format(self.__class__.__name__, self.identifiers)
+        return '{0}{1}'.format(self.__class__.__name__, self.identifiers)
 
     def transform(self, value):
         raise NotImplementedError()
