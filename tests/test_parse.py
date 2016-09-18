@@ -95,20 +95,20 @@ class TestParse:
 
     def test_parse_index(self):
         query = 'level1.level2[42].level3'
-        expected_nodes = [(IdentifierNodeType, ['level1']), (IdentifierNodeType, ['level2']), (IndexNodeType, [42]), (IdentifierNodeType, ['level3'])]
+        expected_nodes = [(IdentifierNodeType, ['level1']), (IdentifierNodeType, ['level2']), (IndexNodeType, ['42']), (IdentifierNodeType, ['level3'])]
         assert parse(query).nodes == expected_nodes
 
         query = 'level1.level2[42]'
-        expected_nodes = [(IdentifierNodeType, ['level1']), (IdentifierNodeType, ['level2']), (IndexNodeType, [42])]
+        expected_nodes = [(IdentifierNodeType, ['level1']), (IdentifierNodeType, ['level2']), (IndexNodeType, ['42'])]
         assert parse(query).nodes == expected_nodes
 
     def test_parse_index_nested(self):
         query = 'level1.level2[4][2].level3'
-        expected_nodes = [(IdentifierNodeType, ['level1']), (IdentifierNodeType, ['level2']), (IndexNodeType, [4]), (IndexNodeType, [2]), (IdentifierNodeType, ['level3'])]
+        expected_nodes = [(IdentifierNodeType, ['level1']), (IdentifierNodeType, ['level2']), (IndexNodeType, ['4']), (IndexNodeType, ['2']), (IdentifierNodeType, ['level3'])]
         assert parse(query).nodes == expected_nodes
 
         query = 'level1.level2[4][2]'
-        expected_nodes = [(IdentifierNodeType, ['level1']), (IdentifierNodeType, ['level2']), (IndexNodeType, [4]), (IndexNodeType, [2])]
+        expected_nodes = [(IdentifierNodeType, ['level1']), (IdentifierNodeType, ['level2']), (IndexNodeType, ['4']), (IndexNodeType, ['2'])]
         assert parse(query).nodes == expected_nodes
 
     def test_parse_index_string(self):

@@ -69,7 +69,7 @@ class TestTokenize:
 
     def test_tokenize_quoted_identifiers(self):
         query = 'level1.level2["$.level3[0,1]\\[:-1]|a"]'
-        expected_tokens = ['level1', 'level2', '[$.level3[0\\,1]\\\\[\\:-1]\\|a]']
+        expected_tokens = ['level1', 'level2', '[\\$.level3[0\\,1]\\\\[\\:-1]\\|a]']
         assert list(tokenize(query)) == expected_tokens
 
     def test_tokenize_escaped_union(self):

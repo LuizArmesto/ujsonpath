@@ -26,12 +26,16 @@ IDENTIFIER_SYMBOL = '.'
 # Node types
 class BaseNodeType(object):
     @classmethod
-    def get_value(cls, node, data, root):
+    def process_value(cls, value):
+        return None
+
+    @classmethod
+    def evaluate(cls, node, data, root):
         raise NotImplementedError()
 
 class RootNodeType(BaseNodeType):
     @classmethod
-    def get_value(cls, node, data, root):
+    def evaluate(cls, node, data, root):
         return [root]
 
 
@@ -41,7 +45,7 @@ class SelfNodeType(BaseNodeType):
 
 class WildcardNodeType(BaseNodeType):
     @classmethod
-    def get_value(cls, node, data, root):
+    def evaluate(cls, node, data, root):
         # wildcard should work for lists and dicts
         data = data.value
         if isinstance(data, list):
@@ -59,7 +63,11 @@ class DescendantNodeType(BaseNodeType):
 
 class SliceNodeType(BaseNodeType):
     @classmethod
-    def get_value(cls, node, data, root):
+    def process_value(cls, value):
+        return slice(*[int(i) for i in value.split(SLICE_OPERATOR_SYMBOL) if i])
+
+    @classmethod
+    def evaluate(cls, node, data, root):
         try:
             value = [Match(val, None) for val in data.value[node.value]]
         except (KeyError, TypeError):
@@ -68,16 +76,44 @@ class SliceNodeType(BaseNodeType):
 
 
 class ExpressionNodeType(BaseNodeType):
-    pass
-
+    @classmethod
+    def process_value(cls, value):
+        return value[1:-1]
 
 class FilterNodeType(BaseNodeType):
-    pass
-
+    @classmethod
+    def process_value(cls, value):
+        return value[2:-1]
 
 class IndexNodeType(BaseNodeType):
     @classmethod
-    def get_value(cls, node, data, root):
+    def process_value(cls, value):
+        # try to split unions
+        value = escaped_split(value, UNION_OPERATOR_SYMBOL)
+        if len(value) > 1:
+            operator = UnionOperator
+        else:
+            value = escaped_split(value[0], OR_OPERATOR_SYMBOL)
+            if len(value) > 1:
+                operator = OrOperator
+            else:
+                operator = list
+
+        value = clean_list(value)
+        # unescape union and slide operators
+        value = [val.replace(
+            ESCAPE_SYMBOL + ESCAPE_SYMBOL, ESCAPE_SYMBOL).replace(
+            ESCAPE_SYMBOL + UNION_OPERATOR_SYMBOL, UNION_OPERATOR_SYMBOL).replace(
+            ESCAPE_SYMBOL + OR_OPERATOR_SYMBOL, OR_OPERATOR_SYMBOL).replace(
+            ESCAPE_SYMBOL + SLICE_OPERATOR_SYMBOL, SLICE_OPERATOR_SYMBOL).replace(
+            ESCAPE_SYMBOL + ROOT_SYMBOL, ROOT_SYMBOL
+        ) for val in value]
+
+        value = operator(value)
+        return value
+
+    @classmethod
+    def evaluate(cls, node, data, root):
         # both, identifier and index, can be accessed as a key
         value = []
         for val in node.value:
@@ -177,7 +213,7 @@ def get_node_value(node, data, root):
     try:
         value = [get_node_value(node, datum, root) for datum in data]
     except TypeError:
-        value = node.type.get_value(node, data, root)
+        value = node.type.evaluate(node, data, root)
     # if the original query have more than one wildcard, we can get a list of lists
     # but we want a flat list
     value = _join_lists(value)
@@ -210,7 +246,7 @@ def tokenize(query):
             escaped = False
             token += char
         elif quoted:
-            if char in UNION_OPERATOR_SYMBOL + SLICE_OPERATOR_SYMBOL + OR_OPERATOR_SYMBOL + ESCAPE_SYMBOL:
+            if char in UNION_OPERATOR_SYMBOL + SLICE_OPERATOR_SYMBOL + OR_OPERATOR_SYMBOL + ESCAPE_SYMBOL + ROOT_SYMBOL:
                 # escape special symbols used inside quotation
                 token += ESCAPE_SYMBOL
             if char == quote_used:
@@ -262,90 +298,56 @@ def tokenize(query):
         yield token
 
 
+class Parser(object):
+    def __init__(self, tokens):
+        self.tokens = tokens
+
+    def _get_node_type(self, token):
+        node_types = {
+            ROOT_SYMBOL: RootNodeType,
+            DESCENDANT_SYMBOL: DescendantNodeType,
+            FILTER_OPERATOR_SYMBOL: FilterNodeType,
+            EXPRESSION_START_SYMBOL: ExpressionNodeType,
+            WILDCARD_SYMBOL: WildcardNodeType
+        }
+        node_type = node_types.get(token.strip(), None)
+        value = token
+        if not node_type:
+            if token[0] == BRACKET_START_SYMBOL and token[-1] == BRACKET_END_SYMBOL:
+                value = token[1:-1]
+                # token have not escaped slice delimiter, let's check if it is really a slice
+                if SLICE_OPERATOR_SYMBOL in value.replace('\\' + SLICE_OPERATOR_SYMBOL, ''):
+                    # it is slice if we found the slice separator
+                    node_type = SliceNodeType
+                else:
+                    node_type = node_types.get(value[0], IdentifierNodeType)
+            else:
+                # everything else is an identifier
+                node_type = IdentifierNodeType
+        return node_type, value
+
+    def parse(self):
+        nodes = []
+        for token in self.tokens:
+            node_type, value = self._get_node_type(token)
+            try:
+                value = node_type.process_value(value)
+            except ValueError:
+                node_type = IdentifierNodeType
+                value = node_type.process_value(value)
+
+            nodes.append(Node(type=node_type, value=value))
+        return nodes
+
+
 def parse(query):
     """
     Parse json path query.
     :param query: string
     :return: JsonPath object
     """
-
-    tokens = tokenize(query)
-    nodes = []
-
-    for token in tokens:
-        if token == ROOT_SYMBOL:
-            node_type = RootNodeType
-            value = None
-        elif token == DESCENDANT_SYMBOL:
-            node_type = DescendantNodeType
-            value = None
-        elif token[0] == BRACKET_START_SYMBOL and token[-1] == BRACKET_END_SYMBOL:
-            # token have not escaped slice delimiter, let's check if it is really a slice
-            if SLICE_OPERATOR_SYMBOL in token.replace('\\' + SLICE_OPERATOR_SYMBOL, ''):
-                # it is slice if we found the slice separator
-                node_type = SliceNodeType
-                try:
-                    value = slice(*[int(i) for i in token[1:-1].split(SLICE_OPERATOR_SYMBOL) if i])
-                except ValueError:
-                    node_type = IdentifierNodeType
-                    value = token[1:-1]
-            elif WILDCARD_SYMBOL in token:
-                # but it can also be a wildcard
-                node_type = WildcardNodeType
-                value = None
-            elif token[1] == EXPRESSION_START_SYMBOL and token[-2] == EXPRESSION_END_SYMBOL:
-                node_type = ExpressionNodeType
-                value = token[2:-2]
-            elif token[1] in FILTER_OPERATOR_SYMBOL and token[2] == EXPRESSION_START_SYMBOL and token[-2] == EXPRESSION_END_SYMBOL:
-                node_type = FilterNodeType
-                value = token[3:-2]
-            else:
-                try:
-                    # or an index. let's check if the value is numeric
-                    node_type = IndexNodeType
-                    value = [int(token[1:-1])]
-                except ValueError:
-                    # it's not numeric, so it's an identifier
-                    node_type = IdentifierNodeType
-                    value = token[1:-1].strip()
-        else:
-            # everything else is an identifier
-            node_type = IdentifierNodeType
-            value = token.strip()
-            if value == WILDCARD_SYMBOL:
-                # except if it is a wildcard
-                node_type = WildcardNodeType
-                value = None
-
-        if node_type == IdentifierNodeType:
-            try:
-                # try to split unions
-                value = escaped_split(value, UNION_OPERATOR_SYMBOL)
-                if len(value) > 1:
-                    operator = UnionOperator
-                else:
-                    value = escaped_split(value[0], OR_OPERATOR_SYMBOL)
-                    if len(value) > 1:
-                        operator = OrOperator
-                    else:
-                        operator = list
-
-                value = [val.strip(SPACE_SYMBOL) for val in value]
-                # unescape union and slide operators
-                value = [val.replace(
-                    ESCAPE_SYMBOL + ESCAPE_SYMBOL, ESCAPE_SYMBOL).replace(
-                    ESCAPE_SYMBOL + UNION_OPERATOR_SYMBOL, UNION_OPERATOR_SYMBOL).replace(
-                    ESCAPE_SYMBOL + OR_OPERATOR_SYMBOL, OR_OPERATOR_SYMBOL).replace(
-                    ESCAPE_SYMBOL + SLICE_OPERATOR_SYMBOL, SLICE_OPERATOR_SYMBOL
-                ) for val in value]
-
-                value = operator(value)
-            except AttributeError:
-                # failed to strip/split because value could be a list or an integer
-                pass
-
-        nodes.append(Node(type=node_type, value=value))
-
+    tokens = list(tokenize(query))
+    nodes = Parser(tokens).parse()
     return JsonPath(nodes)
 
 
@@ -357,8 +359,15 @@ def _join_lists(value):
     return value
 
 
-def clean_list(data, exclude=('',)):
-    return [val.strip() for val in data if val not in exclude]
+def clean_list(data, exclude=tuple(), strip=SPACE_SYMBOL):
+    cleanned_list = []
+    for val in data:
+        if val not in exclude:
+            try:
+                val = val.strip(strip)
+            finally:
+                cleanned_list.append(val)
+    return cleanned_list
 
 
 def escaped_split(string, char):
@@ -368,4 +377,4 @@ def escaped_split(string, char):
     for section in sections:
         result[idx] += section
         idx += int(not section.endswith(char))
-    return clean_list(result)
+    return clean_list(result, exclude=('',))
