@@ -25,13 +25,13 @@ IDENTIFIER_SYMBOL = '.'
 
 # Node types
 class BaseNodeType(object):
-    @staticmethod
-    def get_value(node, data, root):
+    @classmethod
+    def get_value(cls, node, data, root):
         raise NotImplementedError()
 
 class RootNodeType(BaseNodeType):
-    @staticmethod
-    def get_value(node, data, root):
+    @classmethod
+    def get_value(cls, node, data, root):
         return [root]
 
 
@@ -40,8 +40,8 @@ class SelfNodeType(BaseNodeType):
 
 
 class WildcardNodeType(BaseNodeType):
-    @staticmethod
-    def get_value(node, data, root):
+    @classmethod
+    def get_value(cls, node, data, root):
         # wildcard should work for lists and dicts
         data = data.value
         if isinstance(data, list):
@@ -58,8 +58,8 @@ class DescendantNodeType(BaseNodeType):
 
 
 class SliceNodeType(BaseNodeType):
-    @staticmethod
-    def get_value(node, data, root):
+    @classmethod
+    def get_value(cls, node, data, root):
         try:
             value = [Match(val, None) for val in data.value[node.value]]
         except (KeyError, TypeError):
@@ -76,8 +76,8 @@ class FilterNodeType(BaseNodeType):
 
 
 class IndexNodeType(BaseNodeType):
-    @staticmethod
-    def get_value(node, data, root):
+    @classmethod
+    def get_value(cls, node, data, root):
         # both, identifier and index, can be accessed as a key
         value = []
         for val in node.value:
@@ -86,17 +86,13 @@ class IndexNodeType(BaseNodeType):
                 value.append(Match(data.value[val], None))
             except (IndexError, KeyError, TypeError):
                 try:
-                    # try to convert to integer index
+                    # try to convert key to integer
                     value.append(Match(data.value[int(val)], None))
                 except (ValueError, IndexError, KeyError, TypeError):
+                    # Match not found... try next
                     pass
-        if isinstance(node.value, OrOperator):
-            try:
-                value = [value[0]]
-            except IndexError:
-                pass
-        if not value:
-            value = [MatchNotFound()]
+        if isinstance(node.value, Operator):
+            value = node.value.transform(value)
         return value
 
 
@@ -116,13 +112,21 @@ class Operator(object):
     def __getitem__(self, i):
         return self.identifiers[i]
 
+    def transform(self, value):
+        raise NotImplementedError()
+
 
 class UnionOperator(Operator):
-    pass
+    def transform(self, value):
+        return value
 
 
 class OrOperator(Operator):
-    pass
+    def transform(self, value):
+        try:
+            value = [value[0]]
+        finally:
+            return value
 
 
 class MatchNotFound(object):
@@ -177,6 +181,8 @@ def get_node_value(node, data, root):
     # if the original query have more than one wildcard, we can get a list of lists
     # but we want a flat list
     value = _join_lists(value)
+    if not value:
+        value = [MatchNotFound()]
     return value
 
 
