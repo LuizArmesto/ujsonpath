@@ -229,6 +229,7 @@ def _evaluate_node(node, data, root):
         value = [MatchNotFound()]
     return value
 
+
 def generate_tokens(query):
     """
     Extract a list of tokens from query.
@@ -242,6 +243,7 @@ def generate_tokens(query):
     quoted = False
     quote_used = ''
 
+    # open/close quote equivalence
     quotes = {
         SINGLE_QUOTE_SYMBOL: SINGLE_QUOTE_SYMBOL,
         DOUBLE_QUOTE_SYMBOL: DOUBLE_QUOTE_SYMBOL,
@@ -251,24 +253,31 @@ def generate_tokens(query):
     query = query.strip()
     for char in query:
         if escaped:
+            # don't try to interpret the meaning of the current char if it is escaped
             escaped = False
             token += char
         elif quoted:
+            # don't try to interpret the meaning of chars inside quotes
             if char in (UNION_OPERATOR_SYMBOL, SLICE_OPERATOR_SYMBOL, OR_OPERATOR_SYMBOL, ESCAPE_SYMBOL):
-                # escape special symbols used inside quotation
+                # escape special symbols
                 token += ESCAPE_SYMBOL
+            # check if it is time to close the quote
             quoted = not char == quotes[quote_used]
             token += char
         elif char in ESCAPE_SYMBOL:
+            # the next char will be escaped
             escaped = True
             token += char
         elif char in quotes:
+            # starting quote
             quote_used = char
             quoted = True
             token += char
         elif previous_char + char == DESCENDANT_SYMBOL:
+            # descendant is a special case because it uses the same symbol used to separate identifiers (".")
             yield DESCENDANT_SYMBOL
         elif char in (IDENTIFIER_SYMBOL, BRACKET_START_SYMBOL, BRACKET_END_SYMBOL):
+            # reached a token separator
             yield token
             token = ''
         else:
@@ -280,8 +289,10 @@ def generate_tokens(query):
 
 
 def tokenize(query):
+    # create a list of tokens from token generator
     tokens = list(generate_tokens(query))
-    tokens = clean_list(tokens, exclude=('', ))  # remove empty strings
+    # remove empty strings
+    tokens = clean_list(tokens, exclude=('', ))
     return tokens
 
 
@@ -289,21 +300,26 @@ def _get_node_type(token):
     node_types = {
         ROOT_SYMBOL: RootNodeType,
         DESCENDANT_SYMBOL: DescendantNodeType,
+        WILDCARD_SYMBOL: WildcardNodeType,
         FILTER_OPERATOR_SYMBOL: FilterNodeType,
         EXPRESSION_START_SYMBOL: ExpressionNodeType,
-        WILDCARD_SYMBOL: WildcardNodeType,
         SINGLE_QUOTE_SYMBOL: IdentifierNodeType,
         DOUBLE_QUOTE_SYMBOL: IdentifierNodeType,
     }
+    # try to get nodes identified by the whole token
+    # ("$" == ROOT, "*" == WILDCARD, ".." == DESCENDANT)
     node_type = node_types.get(token.strip(), None)
-    value = token
     if not node_type:
-        if SLICE_OPERATOR_SYMBOL in value.replace('\\' + SLICE_OPERATOR_SYMBOL, ''):
+        # check if token has slice symbol, but ignore escaped occurrences
+        if SLICE_OPERATOR_SYMBOL in token.replace(ESCAPE_SYMBOL + SLICE_OPERATOR_SYMBOL, ''):
             # it is slice if we found the slice separator
             node_type = SliceNodeType
         else:
-            node_type = node_types.get(value[0], IdentifierNodeType)
-    return node_type, value
+            # try to get nodes identified by the first char
+            # ("?" == FILTER, "(" == EXPRESSION, "\"" ou "'" == IDENTIFIER)
+            # assume to be an IDENTIFIER node otherwise
+            node_type = node_types.get(token[0], IdentifierNodeType)
+    return node_type
 
 
 def parse(query):
@@ -315,12 +331,12 @@ def parse(query):
     nodes = []
     tokens = tokenize(query)
     for token in tokens:
-        node_type, value = _get_node_type(token)
+        node_type = _get_node_type(token)
         try:
-            value = node_type.process_value(value)
+            value = node_type.process_value(token)
         except ValueError:
             node_type = IdentifierNodeType
-            value = node_type.process_value(value)
+            value = node_type.process_value(token)
 
         nodes.append(Node(type=node_type, value=value))
     return JsonPath(nodes)
@@ -335,14 +351,14 @@ def join_lists(value):
 
 
 def clean_list(data, exclude=tuple(), strip=SPACE_SYMBOL):
-    cleanned_list = []
+    cleaned_list = []
     for val in data:
         if val not in exclude:
             try:
                 val = val.strip(strip)
             finally:
-                cleanned_list.append(val)
-    return cleanned_list
+                cleaned_list.append(val)
+    return cleaned_list
 
 
 def escaped_split(string, char):
