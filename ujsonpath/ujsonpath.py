@@ -48,12 +48,13 @@ class SelfNodeType(BaseNodeType):
 class WildcardNodeType(BaseNodeType):
     @classmethod
     def evaluate(cls, node, data, root):
-        # wildcard should work for lists and dicts
+        basepath = data.path
         data = data.value
+        # wildcard should work for lists and dicts
         if isinstance(data, list):
-            value = [Match(val, None) for val in data]
+            value = [Match(val, '{}[{}]'.format(basepath, idx)) for idx, val in enumerate(data)]
         elif isinstance(data, dict):
-            value = [Match(val, None) for val in data.values()]
+            value = [Match(val, '{}["{}"]'.format(basepath, key.replace('"', '\\"'))) for key, val in data.items()]
         else:
             value = [MatchNotFound()]
         return value
@@ -70,8 +71,11 @@ class SliceNodeType(BaseNodeType):
 
     @classmethod
     def evaluate(cls, node, data, root):
+        basepath = data.path
         try:
-            value = [Match(val, None) for val in data.value[node.value]]
+            indices = range(len(data.value))
+            value = [Match(val, '{}[{}]'.format(basepath, idx))
+                     for idx, val in zip(indices[node.value], data.value[node.value])]
         except (KeyError, TypeError):
             value = [MatchNotFound()]
         return value
@@ -111,6 +115,8 @@ class IndexNodeType(BaseNodeType):
             ESCAPE_SYMBOL + OR_OPERATOR_SYMBOL, OR_OPERATOR_SYMBOL).replace(
             ESCAPE_SYMBOL + SLICE_OPERATOR_SYMBOL, SLICE_OPERATOR_SYMBOL).replace(
             ESCAPE_SYMBOL + IDENTIFIER_SYMBOL, IDENTIFIER_SYMBOL).replace(
+            ESCAPE_SYMBOL + SINGLE_QUOTE_SYMBOL, SINGLE_QUOTE_SYMBOL).replace(
+            ESCAPE_SYMBOL + DOUBLE_QUOTE_SYMBOL, DOUBLE_QUOTE_SYMBOL).replace(
             ESCAPE_SYMBOL + ROOT_SYMBOL, ROOT_SYMBOL
         ) for val in value]
 
@@ -119,16 +125,20 @@ class IndexNodeType(BaseNodeType):
 
     @classmethod
     def evaluate(cls, node, data, root):
+        basepath = data.path
         # both, identifier and index, can be accessed as a key
         value = []
         for val in node.value:
             try:
                 # try to access directly
-                value.append(Match(data.value[val], None))
+                path = '{}["{}"]'.format(basepath, val.replace('"', '\\"'))
+                value.append(Match(data.value[val], path))
             except (IndexError, KeyError, TypeError):
                 try:
                     # try to convert key to integer
-                    value.append(Match(data.value[int(val)], None))
+                    val = int(val)
+                    path = '{}[{}]'.format(basepath, val)
+                    value.append(Match(data.value[val], path))
                 except (ValueError, IndexError, KeyError, TypeError):
                     # Match not found... try next
                     pass
@@ -175,6 +185,7 @@ class OrOperator(Operator):
 
 class MatchNotFound(object):
     value = None
+    path = None
 
     def __repr__(self):
         return u'MatchNotFound'
@@ -256,17 +267,17 @@ def generate_tokens(query):
             # don't try to interpret the meaning of the current char if it is escaped
             escaped = False
             token += char
+        elif char in ESCAPE_SYMBOL:
+            # the next char will be escaped
+            escaped = True
+            token += char
         elif quoted:
             # don't try to interpret the meaning of chars inside quotes
-            if char in (UNION_OPERATOR_SYMBOL, SLICE_OPERATOR_SYMBOL, OR_OPERATOR_SYMBOL, ESCAPE_SYMBOL):
+            if char in (UNION_OPERATOR_SYMBOL, SLICE_OPERATOR_SYMBOL, OR_OPERATOR_SYMBOL):
                 # escape special symbols
                 token += ESCAPE_SYMBOL
             # check if it is time to close the quote
             quoted = not char == quotes[quote_used]
-            token += char
-        elif char in ESCAPE_SYMBOL:
-            # the next char will be escaped
-            escaped = True
             token += char
         elif char in quotes:
             # starting quote
